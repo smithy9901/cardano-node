@@ -1,9 +1,6 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE StrictData #-}
 {-# OPTIONS_GHC -Wno-deprecations -Wno-orphans #-}
 {- HLINT ignore "Use head" -}
 module Cardano.Analysis.ChainFilter (module Cardano.Analysis.ChainFilter) where
@@ -13,6 +10,8 @@ import Cardano.Prelude hiding (head)
 import Data.Aeson
 
 import Cardano.Slotting.Slot (EpochNo (..),  SlotNo (..))
+
+import Cardano.Analysis.Chain
 
 
 -- | Conditions for chain subsetting
@@ -34,10 +33,14 @@ data BlockCond
 deriving instance NFData EpochNo
 
 data SlotCond
-  = SlotGEq        SlotNo
-  | SlotLEq        SlotNo
-  | EpochGEq       EpochNo
-  | EpochLEq       EpochNo
+  = SlotGEq         SlotNo
+  | SlotLEq         SlotNo
+  | EpochGEq        EpochNo
+  | EpochLEq        EpochNo
+  | EpochSafeIntGEq EpochSafeInt  -- 10 per epoch for the standard setup of< Ouroboros Praos
+  | EpochSafeIntLEq EpochSafeInt
+  | EpSlotGEq       EpochSlot
+  | EpSlotLEq       EpochSlot
   | SlotHasLeaders
   deriving (FromJSON, Generic, NFData, Show, ToJSON)
 

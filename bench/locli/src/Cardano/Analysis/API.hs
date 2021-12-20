@@ -1,8 +1,5 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {- HLINT ignore "Use head" -}
 module Cardano.Analysis.API (module Cardano.Analysis.API) where
@@ -21,8 +18,9 @@ import Text.Printf              (PrintfArg, printf)
 import Cardano.Slotting.Slot    (EpochNo(..), SlotNo(..))
 import Ouroboros.Network.Block  (BlockNo(..))
 
+import Cardano.Analysis.Chain
 import Cardano.Analysis.ChainFilter
-import Cardano.Analysis.Profile
+import Cardano.Analysis.Run
 import Cardano.Analysis.Version
 import Cardano.Logging.Resources.Types
 import Cardano.Unlog.LogObject  hiding (Text)
@@ -65,6 +63,7 @@ data BlockEvents
   , beBlockNo      :: !BlockNo
   , beSlotNo       :: !SlotNo
   , beEpochNo      :: !EpochNo
+  , beEpochSafeInt    :: !EpochSafeInt
   , beForge        :: !BlockForge
   , beObservations :: [BlockObservation]
   , bePropagation  :: !(Distribution Float NominalDiffTime)
@@ -177,8 +176,9 @@ data MachTimeline
 data SlotStats
   = SlotStats
     { slSlot         :: !SlotNo
-    , slEpoch        :: !Word64
-    , slEpochSlot    :: !Word64
+    , slEpoch        :: !EpochNo
+    , slEpochSlot    :: !EpochSlot
+    , slEpochSafeInt :: !EpochSafeInt
     , slStart        :: !SlotStart
     , slCountChecks  :: !Word64
     , slCountLeads   :: !Word64
@@ -205,15 +205,15 @@ data SlotStats
 --
 -- * Key properties
 --
-testBlockEvents :: Profile -> BlockEvents -> ChainFilter -> Bool
-testBlockEvents Profile{genesis=GenesisProfile{..}}
+testBlockEvents :: Genesis -> BlockEvents -> ChainFilter -> Bool
+testBlockEvents g@Genesis{..}
                 BlockEvents{beForge=BlockForge{..},..} = \case
   CBlock flt -> case flt of
     BUnitaryChainDelta -> bfChainDelta == 1
     BFullnessGEq f ->
-      bfBlockSize > floor ((fromIntegral max_block_size :: Double) * f)
+      bfBlockSize > floor ((fromIntegral (maxBlockBodySize protocolParams) :: Double) * f)
     BFullnessLEq f ->
-      bfBlockSize < floor ((fromIntegral max_block_size :: Double) * f)
+      bfBlockSize < floor ((fromIntegral (maxBlockBodySize protocolParams) :: Double) * f)
     BSizeGEq x -> bfBlockSize >= fromIntegral x
     BSizeLEq x -> bfBlockSize <= fromIntegral x
   CSlot flt -> case flt of
@@ -221,11 +221,15 @@ testBlockEvents Profile{genesis=GenesisProfile{..}}
     SlotLEq s -> beSlotNo <= s
     EpochGEq e -> beEpochNo >= e
     EpochLEq e -> beEpochNo <= e
-    _ -> True
+    SlotHasLeaders -> True
+    EpochSafeIntGEq i -> beEpochSafeInt >= i
+    EpochSafeIntLEq i -> beEpochSafeInt <= i
+    EpSlotGEq s -> snd (g `unsafeParseSlot` beSlotNo) >= s
+    EpSlotLEq s -> snd (g `unsafeParseSlot` beSlotNo) <= s
 
-isValidBlockEvent :: Profile -> [ChainFilter] -> BlockEvents -> Bool
-isValidBlockEvent p criteria be =
-  all (testBlockEvents p be) criteria
+isValidBlockEvent :: Genesis -> [ChainFilter] -> BlockEvents -> Bool
+isValidBlockEvent g criteria be =
+  all (testBlockEvents g be) criteria
 
 isValidBlockObservation :: BlockObservation -> Bool
 isValidBlockObservation BlockObservation{..} =
@@ -235,15 +239,17 @@ isValidBlockObservation BlockObservation{..} =
   -- 2. All timings account for processing of a single block
   boChainDelta == 1
 
-testSlotStats :: Profile -> SlotStats -> SlotCond -> Bool
-testSlotStats Profile{genesis=GenesisProfile{}}
-              SlotStats{..} = \case
+testSlotStats :: Genesis -> SlotStats -> SlotCond -> Bool
+testSlotStats g SlotStats{..} = \case
   SlotGEq  s -> slSlot >= s
   SlotLEq  s -> slSlot <= s
-  EpochGEq s -> fromIntegral slEpoch >= s
-  EpochLEq s -> fromIntegral slEpoch <= s
+  EpochGEq s -> fromIntegral (unEpochNo slEpoch) >= s
+  EpochLEq s -> fromIntegral (unEpochNo slEpoch) <= s
   SlotHasLeaders -> slCountLeads > 0
-
+  EpochSafeIntGEq i -> slEpochSafeInt >= i
+  EpochSafeIntLEq i -> slEpochSafeInt <= i
+  EpSlotGEq s -> snd (g `unsafeParseSlot` slSlot) >= s
+  EpSlotLEq s -> snd (g `unsafeParseSlot` slSlot) <= s
 --
 -- * Timeline rendering instances
 --
@@ -353,8 +359,9 @@ instance RenderTimeline SlotStats where
   rtFields _ =
     --  Width LeftPad
     [ Field 5 0 "abs.slot"     "abs."  "slot#"   $ IWord64 (unSlotNo . slSlot)
-    , Field 4 0 "slot"         "  epo" "slot"    $ IWord64 slEpochSlot
-    , Field 2 0 "epoch"        "ch "   "#"       $ IWord64 slEpoch
+    , Field 4 0 "slot"         "  epo" "slot"    $ IWord64 (unEpochSlot . slEpochSlot)
+    , Field 2 0 "epoch"        "ch "   "#"       $ IWord64 (unEpochNo . slEpoch)
+    , Field 3 0 "safetyInt"    "safe"  "int"     $ IWord64 (unEpochSafeInt . slEpochSafeInt)
     , Field 5 0 "block"        "block" "no."     $ IWord64 slBlockNo
     , Field 5 0 "blockGap"     "block" "gap"     $ IWord64 slBlockless
     , Field 3 0 "leadChecks"   "lead"  "chk"     $ IWord64 slCountChecks

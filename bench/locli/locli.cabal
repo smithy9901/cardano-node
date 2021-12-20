@@ -17,11 +17,12 @@ library
   exposed-modules:     Data.Accum
                        Data.Distribution
 
-                       Cardano.Analysis.Profile
                        Cardano.Analysis.TopHandler
+                       Cardano.Analysis.Run
 
                        Cardano.Analysis.API
                        Cardano.Analysis.BlockProp
+                       Cardano.Analysis.Chain
                        Cardano.Analysis.ChainFilter
                        Cardano.Analysis.Driver
                        Cardano.Analysis.MachTimeline
@@ -74,9 +75,25 @@ library
                      , vector
 
   default-language:    Haskell2010
-  default-extensions:  NoImplicitPrelude
+  default-extensions:  BangPatterns
+                       BlockArguments
+                       DerivingStrategies
+                       DerivingVia
+                       FlexibleContexts
+                       FlexibleInstances
+                       GADTs
+                       ImportQualifiedPost
+                       LambdaCase
+                       NamedFieldPuns
+                       NoImplicitPrelude
                        OverloadedStrings
+                       PartialTypeSignatures
+                       RankNTypes
+                       RecordWildCards
+                       ScopedTypeVariables
+                       StandaloneDeriving
                        TupleSections
+                       TypeApplications
 
   ghc-options:         -Wall
                        -Wincomplete-record-updates

@@ -1,11 +1,4 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE ImpredicativeTypes #-}
+--{-# LANGUAGE ImpredicativeTypes #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns -Wno-name-shadowing #-}
 module Cardano.Analysis.Driver
   ( AnalysisCmdError
@@ -37,7 +30,7 @@ import Cardano.Analysis.API
 import Cardano.Analysis.BlockProp
 import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.MachTimeline
-import Cardano.Analysis.Profile
+import Cardano.Analysis.Run
 import Cardano.Analysis.Version
 import Cardano.Unlog.Commands
 import Cardano.Unlog.LogObject          hiding (Text)
@@ -98,68 +91,68 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfi
   progress "run"     (Q . T.unpack . logfileRunIdentifier . T.pack . unJsonLogfile $ P.head logfiles)
   progress "genesis" (Q $ unJsonGenesisFile genesisFile)
   progress "meta"    (Q $ unJsonRunMetafile metaFile)
-  chainInfo <-
-    ChainInfo
-      <$> firstExceptT (RunMetaParseError metaFile . T.pack)
+  runPartial <- firstExceptT (RunMetaParseError metaFile . T.pack)
                        (newExceptT $
-                        AE.eitherDecode @Profile <$> LBS.readFile (unJsonRunMetafile metaFile))
-      <*> firstExceptT (GenesisParseError genesisFile . T.pack)
+                        AE.eitherDecode @RunPartial <$> LBS.readFile (unJsonRunMetafile metaFile))
+  run        <- firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
-  progress "chain"   (J $ chainInfo)
+                <&> completeRun runPartial
+  progress "run"     (J run)
 
-  chFilters <- fmap (fromMaybe []) $
+  filters <- fmap (fromMaybe []) $
     forM mChFiltersFile $
       \jf@(JsonSelectorFile f) -> do
         firstExceptT (ChainFiltersParseError jf . T.pack)
                      (newExceptT $
                         AE.eitherDecode @[ChainFilter] <$> LBS.readFile f)
-  progress "filters" (J $ chFilters)
+  progress "filters" (J filters)
 
   firstExceptT AnalysisCmdError $
-    runMachineTimeline chainInfo logfiles chFilters oFiles
+    runMachineTimeline run logfiles filters oFiles
+
 runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logfiles oFiles) = do
   progress "run"     (Q . T.unpack . logfileRunIdentifier . T.pack . unJsonLogfile $ P.head logfiles)
   progress "genesis" (Q $ unJsonGenesisFile genesisFile)
   progress "meta"    (Q $ unJsonRunMetafile metaFile)
-  chainInfo <-
-    ChainInfo
-      <$> firstExceptT (RunMetaParseError metaFile . T.pack)
+  runPartial <- firstExceptT (RunMetaParseError metaFile . T.pack)
                        (newExceptT $
-                        AE.eitherDecode @Profile <$> LBS.readFile (unJsonRunMetafile metaFile))
-      <*> firstExceptT (GenesisParseError genesisFile . T.pack)
+                        AE.eitherDecode @RunPartial <$> LBS.readFile (unJsonRunMetafile metaFile))
+  run        <- firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
-  progress "chain"   (J $ chainInfo)
+                <&> completeRun runPartial
+  progress "run"     (J run)
 
-  chFilters <- fmap (fromMaybe []) $
+  filters <- fmap (fromMaybe []) $
     forM mChFiltersFile $
       \jf@(JsonSelectorFile f) -> do
         firstExceptT (ChainFiltersParseError jf . T.pack)
                      (newExceptT $
                         AE.eitherDecode @[ChainFilter] <$> LBS.readFile f)
-  progress "filters" (J $ chFilters)
+  progress "filters" (J filters)
 
   firstExceptT AnalysisCmdError $
-    runBlockPropagation chainInfo chFilters logfiles oFiles
+    runBlockPropagation run filters logfiles oFiles
+
 runAnalysisCommand SubstringKeysCmd =
   liftIO $ mapM_ putStrLn logObjectStreamInterpreterKeys
-runAnalysisCommand (ChainInfoCmd genesisFile metaFile) = do
+
+runAnalysisCommand (RunInfoCmd genesisFile metaFile) = do
   progress "genesis" (Q $ unJsonGenesisFile genesisFile)
   progress "meta"    (Q $ unJsonRunMetafile metaFile)
-  chainInfo <-
-    ChainInfo
-      <$> firstExceptT (RunMetaParseError metaFile . T.pack)
+  runPartial <- firstExceptT (RunMetaParseError metaFile . T.pack)
                        (newExceptT $
-                        AE.eitherDecode @Profile <$> LBS.readFile (unJsonRunMetafile metaFile))
-      <*> firstExceptT (GenesisParseError genesisFile . T.pack)
+                        AE.eitherDecode @RunPartial <$> LBS.readFile (unJsonRunMetafile metaFile))
+  run        <- firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
-  progress "chain"   (J $ chainInfo)
+                <&> completeRun runPartial
+  progress "run"     (J run)
 
 runBlockPropagation ::
-  ChainInfo -> [ChainFilter] -> [JsonLogfile] -> BlockPropagationOutputFiles -> ExceptT Text IO ()
-runBlockPropagation cInfo chConds logfiles BlockPropagationOutputFiles{..} = do
+  Run -> [ChainFilter] -> [JsonLogfile] -> BlockPropagationOutputFiles -> ExceptT Text IO ()
+runBlockPropagation run chConds logfiles BlockPropagationOutputFiles{..} = do
   liftIO $ do
     progress "inputs" (L $ unJsonLogfile <$> logfiles)
     -- 0. Recover LogObjects
@@ -172,7 +165,7 @@ runBlockPropagation cInfo chConds logfiles BlockPropagationOutputFiles{..} = do
             dumpLOStream objs
               (JsonOutputFile $ F.dropExtension f <> ".logobjects.json")
 
-    blockPropagation <- blockProp cInfo chConds objLists
+    blockPropagation <- blockProp run chConds objLists
 
     forM_ bpofTimelinePretty $
       \(TextOutputFile f) ->
@@ -180,9 +173,9 @@ runBlockPropagation cInfo chConds logfiles BlockPropagationOutputFiles{..} = do
           progress "pretty-timeline" (Q f)
           hPutStrLn hnd $ textId f
           mapM_ (T.hPutStrLn hnd)
-            (renderDistributions (cProfile cInfo) RenderPretty blockPropagation)
+            (renderDistributions run RenderPretty blockPropagation)
           mapM_ (T.hPutStrLn hnd)
-            (renderTimeline (cProfile cInfo) $ bpChainBlockEvents blockPropagation)
+            (renderTimeline run $ bpChainBlockEvents blockPropagation)
 
     forM_ bpofAnalysis $
       \(JsonOutputFile f) ->
@@ -207,8 +200,8 @@ progress key = putStrLn . T.pack . \case
   J x  -> printf "{ \"%s\": %s }" key (LBS.unpack $ AE.encode x)
 
 runMachineTimeline ::
-  ChainInfo -> [JsonLogfile] -> [ChainFilter] -> MachineTimelineOutputFiles -> ExceptT Text IO ()
-runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} = do
+  Run -> [JsonLogfile] -> [ChainFilter] -> MachineTimelineOutputFiles -> ExceptT Text IO ()
+runMachineTimeline run@Run{genesis} logfiles filters MachineTimelineOutputFiles{..} = do
   liftIO $ do
 
     -- 0. Recover LogObjects
@@ -218,7 +211,7 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
       (dumpLOStream objs)
 
     -- 1. Derive the basic scalars and vectors
-    let (,) runStats noisySlotStats = timelineFromLogObjects chainInfo objs
+    let (,) runStats noisySlotStats = timelineFromLogObjects run objs
     forM_ mtofSlotStats $
       \(JsonOutputFile f) -> do
         progress "raw-slots" (Q f)
@@ -226,7 +219,7 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
           forM_ noisySlotStats $ LBS.hPutStrLn hnd . AE.encode
 
     -- 2. Reprocess the slot stats
-    let slotStats = filterSlotStats chFilters noisySlotStats
+    let slotStats = filterSlotStats filters noisySlotStats
 
     let rawSlotFirst = (head    noisySlotStats <&> slSlot) & fromMaybe 0
         rawSlotLast  = (lastMay noisySlotStats <&> slSlot) & fromMaybe 0
@@ -241,7 +234,7 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
     let drvVectors0, _drvVectors1 :: [DerivedSlot]
         (,) drvVectors0 _drvVectors1 = computeDerivedVectors slotStats
         timeline :: MachTimeline
-        timeline = slotStatsMachTimeline chainInfo slotStats
+        timeline = slotStatsMachTimeline run slotStats
         timelineOutput :: LBS.ByteString
         timelineOutput = AE.encode timeline
 
@@ -273,13 +266,11 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
    --
    --   On the trailing part, we drop everything since the last leadership check.
    filterSlotStats :: [ChainFilter] -> [SlotStats] -> [SlotStats]
-   filterSlotStats chFilters =
-     filter (\x -> all (testSlotStats p x) slotFilters)
+   filterSlotStats filters =
+     filter (\x -> all (testSlotStats genesis x) slotFilters)
     where
       slotFilters :: [SlotCond]
-      slotFilters = catSlotFilters chFilters
-
-   p = cProfile chainInfo
+      slotFilters = catSlotFilters filters
 
    renderHistogram :: Integral a
      => String -> String -> [a] -> OutputFile -> IO ()
@@ -297,18 +288,18 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
        progress "pretty-timeline" (Q f)
        hPutStrLn hnd $ textId f
        mapM_ (T.hPutStrLn hnd)
-         (renderDistributions p RenderPretty s)
+         (renderDistributions run RenderPretty s)
        mapM_ (T.hPutStrLn hnd)
-         (renderTimeline p xs)
+         (renderTimeline run xs)
    renderExportStats :: RunScalars -> MachTimeline -> CsvOutputFile -> IO ()
    renderExportStats rs s (CsvOutputFile f) =
      withFile f WriteMode $
        \h -> do
          progress "csv-stats" (Q f)
          mapM_ (hPutStrLn h)
-           (renderDistributions p RenderCsv s)
+           (renderDistributions run RenderCsv s)
          mapM_ (hPutStrLn h) $
-           renderChainInfoExport chainInfo
+           renderRunExport run
            <>
            renderRunScalars rs
    renderExportTimeline :: [SlotStats] -> CsvOutputFile -> IO ()

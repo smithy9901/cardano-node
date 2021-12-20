@@ -36,7 +36,7 @@ data AnalysisCommand
       [JsonLogfile]
       BlockPropagationOutputFiles
   | SubstringKeysCmd
-  | ChainInfoCmd
+  | RunInfoCmd
       JsonGenesisFile
       JsonRunMetafile
   deriving (Show)
@@ -69,7 +69,7 @@ renderAnalysisCommand sc =
     MachineTimelineCmd {}  -> "analyse machine-timeline"
     BlockPropagationCmd {} -> "analyse block-propagation"
     SubstringKeysCmd {}    -> "analyse substring-keys"
-    ChainInfoCmd {}        -> "print extracted ChainInfo"
+    RunInfoCmd {}        -> "print extracted Run information"
 
 parseMachineTimelineOutputFiles :: Parser MachineTimelineOutputFiles
 parseMachineTimelineOutputFiles =
@@ -156,7 +156,7 @@ parseAnalysisCommands =
           (Opt.info (pure SubstringKeysCmd) $
             Opt.progDesc "Dump substrings that narrow logs to relevant subset")
       , Opt.command "chaininfo"
-          (Opt.info (ChainInfoCmd
+          (Opt.info (RunInfoCmd
                        <$> argJsonGenesisFile "genesis"
                               "Genesis file of the run"
                        <*> argJsonRunMetafile "run-metafile"

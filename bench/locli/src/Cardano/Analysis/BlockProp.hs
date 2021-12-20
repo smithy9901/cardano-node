@@ -50,8 +50,9 @@ import Data.Accum
 import Data.Distribution
 
 import Cardano.Analysis.API
+import Cardano.Analysis.Chain
 import Cardano.Analysis.ChainFilter
-import Cardano.Analysis.Profile
+import Cardano.Analysis.Run
 import Cardano.Analysis.Version
 import Cardano.Unlog.LogObject  hiding (Text)
 import Cardano.Unlog.Render
@@ -258,17 +259,17 @@ mapChainToPeerBlockObservationCDF percs cbes proj desc =
    blockObservations be =
      proj `mapMaybe` filter isValidBlockObservation (beObservations be)
 
-blockProp :: ChainInfo -> [ChainFilter] -> [(JsonLogfile, [LogObject])] -> IO BlockPropagation
-blockProp ci cFilters xs = do
+blockProp :: Run -> [ChainFilter] -> [(JsonLogfile, [LogObject])] -> IO BlockPropagation
+blockProp run cFilters xs = do
   putStrLn ("blockProp: recovering block event maps" :: String)
-  doBlockProp (cProfile ci) cFilters =<< mapConcurrently
+  doBlockProp run cFilters =<< mapConcurrently
     (\x ->
         evaluate $ DS.force $
-        blockEventMapsFromLogObjects ci x)
+        blockEventMapsFromLogObjects run x)
     xs
 
-doBlockProp :: Profile -> [ChainFilter] -> [MachView] -> IO BlockPropagation
-doBlockProp p cFilters machViews = do
+doBlockProp :: Run -> [ChainFilter] -> [MachView] -> IO BlockPropagation
+doBlockProp run@Run{genesis} cFilters machViews = do
   putStrLn ("tip block: "    <> show tipBlock :: String)
   putStrLn ("chain length: " <> show (length chain) :: String)
   pure BlockPropagation
@@ -303,7 +304,7 @@ doBlockProp p cFilters machViews = do
    chain, chainV :: [BlockEvents]
    chain          = rebuildChain (fmap deltifyEvents <$> eventMaps) tipHash
                     & computeChainBlockGaps
-   chainV         = filter (isValidBlockEvent p cFilters) chain &
+   chainV         = filter (isValidBlockEvent genesis cFilters) chain &
                     \case
                       [] -> error $ mconcat
                         ["All ", show (length chain)
@@ -371,11 +372,12 @@ doBlockProp p cFilters machViews = do
    liftBlockEvents :: ForgerEvents NominalDiffTime -> [ObserverEvents NominalDiffTime] -> [BPError] -> BlockEvents
    liftBlockEvents ForgerEvents{bfeHost=host, ..} os errs =
      BlockEvents
-     { beBlock      = bfeBlock
-     , beBlockPrev  = bfeBlockPrev
-     , beBlockNo    = bfeBlockNo
-     , beSlotNo     = bfeSlotNo
-     , beEpochNo    = bfeEpochNo
+     { beBlock        = bfeBlock
+     , beBlockPrev    = bfeBlockPrev
+     , beBlockNo      = bfeBlockNo
+     , beSlotNo       = bfeSlotNo
+     , beEpochNo      = bfeEpochNo
+     , beEpochSafeInt = slotEpochSafeInt genesis (snd $ genesis `unsafeParseSlot` bfeSlotNo)
      , beForge =
        BlockForge
        { bfForger     = host
@@ -444,15 +446,15 @@ doBlockProp p cFilters machViews = do
        ]
 
 -- | Given a single machine's log object stream, recover its block map.
-blockEventMapsFromLogObjects :: ChainInfo -> (JsonLogfile, [LogObject]) -> MachView
-blockEventMapsFromLogObjects ci (f@(unJsonLogfile -> fp), xs) =
+blockEventMapsFromLogObjects :: Run -> (JsonLogfile, [LogObject]) -> MachView
+blockEventMapsFromLogObjects run (f@(unJsonLogfile -> fp), xs) =
   trace ("processing " <> fp)
   $ if Map.size (mvBlocks view) == 0
     then error $ mconcat
          ["No block events in ",fp," : ","LogObject count: ",show (length xs)]
     else view
  where
-   view = foldl (blockPropMachEventsStep ci f) initial xs
+   view = foldl (blockPropMachEventsStep run f) initial xs
    initial =
      MachView
      { mvBlocks  = mempty
@@ -460,8 +462,8 @@ blockEventMapsFromLogObjects ci (f@(unJsonLogfile -> fp), xs) =
      , mvLeading = Nothing
      }
 
-blockPropMachEventsStep :: ChainInfo -> JsonLogfile -> MachView -> LogObject -> MachView
-blockPropMachEventsStep ci@CInfo{..} (JsonLogfile fp) mv@MachView{..} lo = case lo of
+blockPropMachEventsStep :: Run -> JsonLogfile -> MachView -> LogObject -> MachView
+blockPropMachEventsStep run@Run{genesis} (JsonLogfile fp) mv@MachView{..} lo = case lo of
   -- 0. Notice (observer only)
   LogObject{loAt, loHost, loBody=LOChainSyncClientSeenHeader{loBlock,loBlockNo,loSlotNo}} ->
     let mbe0 = getBlock loBlock
@@ -469,7 +471,7 @@ blockPropMachEventsStep ci@CInfo{..} (JsonLogfile fp) mv@MachView{..} lo = case 
       MOE
        (ObserverEvents
         loHost loBlock loBlockNo loSlotNo
-        (slotStart ci loSlotNo) (Just loAt)
+        (slotStart genesis loSlotNo) (Just loAt)
         Nothing Nothing Nothing 0 Nothing Nothing [] [])
       & doInsert loBlock
   -- 1. Request (observer only)
@@ -507,9 +509,8 @@ blockPropMachEventsStep ci@CInfo{..} (JsonLogfile fp) mv@MachView{..} lo = case 
         , bfeBlockPrev    = loPrev
         , bfeBlockNo      = loBlockNo
         , bfeSlotNo       = loSlotNo
-        , bfeSlotStart    = slotStart ci loSlotNo
-        , bfeEpochNo      = EpochNo $
-                            fst (unSlotNo loSlotNo `divMod` epoch_length gsis)
+        , bfeSlotStart    = slotStart genesis loSlotNo
+        , bfeEpochNo      = fst $ genesis `unsafeParseSlot` loSlotNo
         , bfeBlockSize    = Nothing
         , bfeChecked      = mvChecked
         , bfeLeading      = mvLeading
