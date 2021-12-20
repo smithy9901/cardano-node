@@ -13,20 +13,28 @@ usage_analyse() {
 
     Options of 'analyse' command:
 
-       --chain-filters F  Read chain filters to apply from the F JSON file
+       --filters F,F,F..  Comma-separated list of named chain filters:  see bench/chain-filters
        --reanalyse        Skip the preparatory steps and launch 'locli' directly
        --dump-logobjects  Dump the intermediate data: lifted log objects
 EOF
 }
 
 analyse() {
-local time= dump_logobjects= self_args=() locli_args=() prefilter='true' prefilter_jq='false'
+local time= dump_logobjects= self_args=() locli_args=() prefilter='true' prefilter_jq='false' filters=()
 while test $# -gt 0
 do case "$1" in
        --reanalyse | --re ) prefilter='false';       self_args+=($1);;
        --prefilter-jq )     prefilter_jq='true';     self_args+=($1);;
        --dump-logobjects )  dump_logobjects='true';  self_args+=($1);;
-       --chain-filters )    locli_args+=($1 $2);     self_args+=($1 $2); shift;;
+       --filters )          local filter_names=($(echo $2 | sed 's_,_ _'))
+                            local filter_paths=(${filter_names[*]/#/"bench/chain-filters/"})
+                            local filter_files=(${filter_paths[*]/%/.json})
+                            for f in ${filter_files[*]}
+                            do test -f "$f" ||
+                                    fail "no such filter: $f"; done
+                            oprint "filter files:  ${filter_files[*]}"
+                            locli_args+=(${filter_files[*]/#/--filter })
+                            self_args+=($1 $2); shift;;
        * ) break;; esac; shift; done
 
 local op=${1:-$(usage_analyse)}; shift

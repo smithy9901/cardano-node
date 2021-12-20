@@ -26,13 +26,13 @@ data AnalysisCommand
   = MachineTimelineCmd
       JsonGenesisFile
       JsonRunMetafile
-      (Maybe JsonSelectorFile)
+      [JsonSelectorFile]
       [JsonLogfile]
       MachineTimelineOutputFiles
   | BlockPropagationCmd
       JsonGenesisFile
       JsonRunMetafile
-      (Maybe JsonSelectorFile)
+      [JsonSelectorFile]
       [JsonLogfile]
       BlockPropagationOutputFiles
   | SubstringKeysCmd
@@ -134,8 +134,8 @@ parseAnalysisCommands =
                               "Genesis file of the run"
                        <*> argJsonRunMetafile "run-metafile"
                               "The meta.json file from the benchmark run"
-                       <*> optional
-                             (argJsonBlockSelectors "chain-filters"
+                       <*> many
+                             (argJsonBlockSelectors "filter"
                                "List of block selection criteria, as JSON file")
                        <*> some argJsonLogfile
                        <*> parseMachineTimelineOutputFiles) $
@@ -146,8 +146,8 @@ parseAnalysisCommands =
                               "Genesis file of the run"
                        <*> argJsonRunMetafile "run-metafile"
                               "The meta.json file from the benchmark run"
-                       <*> optional
-                             (argJsonBlockSelectors "chain-filters"
+                       <*> many
+                             (argJsonBlockSelectors "filter"
                                "List of block selection criteria, as JSON file")
                        <*> many argJsonLogfile
                        <*> parseBlockPropagationOutputFiles) $

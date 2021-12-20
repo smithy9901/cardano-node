@@ -100,7 +100,7 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfi
                 <&> completeRun runPartial
   progress "run"     (J run)
 
-  filters <- fmap (fromMaybe []) $
+  filters <- fmap mconcat $
     forM mChFiltersFile $
       \jf@(JsonSelectorFile f) -> do
         firstExceptT (ChainFiltersParseError jf . T.pack)
@@ -124,7 +124,7 @@ runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logf
                 <&> completeRun runPartial
   progress "run"     (J run)
 
-  filters <- fmap (fromMaybe []) $
+  filters <- fmap mconcat $
     forM mChFiltersFile $
       \jf@(JsonSelectorFile f) -> do
         firstExceptT (ChainFiltersParseError jf . T.pack)
