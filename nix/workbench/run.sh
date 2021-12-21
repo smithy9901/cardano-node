@@ -351,6 +351,18 @@ case "$op" in
         then jq             'keys | .[]' -r "$dir"/node-specs.json
         else jq '.hostname | keys | .[]' -r "$dir"/meta.json; fi;;
 
+    fetch-analysis | fa )
+        local usage="USAGE: wb run $op ENV DEPL BATCH-OR-TAG.."
+        local   env=${1:?$usage}; shift
+        local  depl=${1:?$usage}; shift
+
+        for x in $*
+        do
+            ssh $env -- \
+                sh -c "'cd $depl/runs && tar c {*.$x.*,$x}/analysis/{block-propagation,logs-node-1.timeline}.txt --zstd --ignore-failed-read'" 2>/dev/null |
+                (cd run; tar x --zstd); done
+        ;;
+
     remote-machine-run-slice-list | rmrsl )
         local usage="USAGE: wb run $op ENV DEPL [HOST=DEPL]"
         local env=${1:?$usage}
