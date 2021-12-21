@@ -536,7 +536,7 @@ newtype VerificationKeyBase64
   = VerificationKeyBase64 String
   deriving Show
 
--- | Data required to construct a witness.
+-- | Data required to construct a witness for a transaction or a Plutus script.
 data WitnessSigningData
   = KeyWitnessSigningData
       !SigningKeyFile
@@ -546,6 +546,9 @@ data WitnessSigningData
       --
       -- If specified, both the network ID and derivation path are extracted
       -- from the address and used in the construction of the Byron witness.
+  | PlutusRequiredSigner
+      !RequiredSigner
+      -- ^ Path to the Plutus required signer.
   deriving Show
 
 -- | Either a stake pool verification key, genesis delegate verification key,

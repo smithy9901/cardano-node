@@ -136,6 +136,9 @@ instance HasTextEnvelope (VerificationKey ByronKey) where
 instance HasTextEnvelope (SigningKey ByronKey) where
     textEnvelopeType _ = "PaymentSigningKeyByron_ed25519_bip32"
 
+instance HasTextEnvelope (Hash ByronKey) where
+    textEnvelopeType _ = "PaymentKeyByronHash"
+
 instance SerialiseAsRawBytes (VerificationKey ByronKey) where
     serialiseToRawBytes (ByronVerificationKey (Byron.VerificationKey xvk)) =
       Crypto.HD.unXPub xvk

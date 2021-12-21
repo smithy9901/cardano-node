@@ -755,7 +755,8 @@ makeShelleyBasedBootstrapWitness era nwOrAddr txbody (ByronSigningKey sk) =
         (Byron.aaNetworkMagic . unAddrAttrs)
         eitherNwOrAddr
 
-
+-- This is specifically for signing keys in the context
+-- of signing transactions.
 data ShelleyWitnessSigningKey =
        WitnessPaymentKey         (SigningKey PaymentKey)
      | WitnessPaymentExtendedKey (SigningKey PaymentExtendedKey)

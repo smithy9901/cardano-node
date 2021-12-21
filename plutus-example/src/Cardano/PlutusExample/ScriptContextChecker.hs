@@ -27,11 +27,13 @@ import           Control.Monad.Trans.Except.Extra
 import qualified Data.Aeson as Aeson
 import           Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy as LB
+import qualified Data.ByteString.Lazy.Char8 as C8
 import qualified Data.ByteString.Short as SBS
 import qualified Data.Map.Strict as Map
 import           Data.Maybe as M
 import qualified Data.Sequence.Strict as Seq
 import qualified Data.Set as Set
+import           Data.String (IsString (..))
 import           GHC.Records (HasField (..))
 
 import           Cardano.CLI.Environment
@@ -60,6 +62,7 @@ import qualified PlutusTx.AssocMap as AMap
 import           PlutusTx.IsData.Class
 import           PlutusTx.Prelude hiding (Semigroup (..), unless, (.))
 import qualified PlutusTx.Prelude as P
+import           Plutus.V1.Ledger.Bytes (fromHex)
 
 -- Description
 -- MyCustomRedeemer mimics the ScriptContext. MyCustomRedeemer is built via reading
@@ -384,14 +387,14 @@ fromPlutusTxId (Plutus.TxId builtInBs) =
 -- redeemer.
 
 {-# INLINABLE mkPolicy #-}
-mkPolicy :: MyCustomRedeemer -> Plutus.ScriptContext -> Bool
-mkPolicy (MyCustomRedeemer _ _ minted txValidRange _fee _ _ signatories mPurpose) scriptContext =
+mkPolicy :: Plutus.PubKeyHash -> MyCustomRedeemer -> Plutus.ScriptContext -> Bool
+mkPolicy reqSigner (MyCustomRedeemer _ _ minted txValidRange _fee _ _ _ mPurpose) scriptContext =
   -- Minted value is equivalent
   minted P.== Plutus.txInfoMint txInfo P.&&
   -- Validity range is equivalent
   Plutus.txInfoValidRange txInfo P.== txValidRange P.&&
-  -- Required signers are equivalent
-  AMap.member singleSignatory scriptContextSignatoriesMap P.&&
+  -- Signed by required signer
+  Plutus.txSignedBy txInfo reqSigner P.&&
 
   case mPurpose of
     Just sPurp -> sPurp P.== sPurpose
@@ -400,34 +403,35 @@ mkPolicy (MyCustomRedeemer _ _ minted txValidRange _fee _ _ signatories mPurpose
    sPurpose :: Plutus.ScriptPurpose
    sPurpose = Plutus.scriptContextPurpose scriptContext
 
-   scriptContextSignatoriesMap :: AMap.Map Plutus.PubKeyHash Integer
-   scriptContextSignatoriesMap = AMap.fromList P.$ P.zip (Plutus.txInfoSignatories txInfo) [1]
-
-   singleSignatory :: Plutus.PubKeyHash
-   singleSignatory = P.head signatories
-
    txInfo :: Plutus.TxInfo
    txInfo = Plutus.scriptContextTxInfo scriptContext
 
-policy :: Scripts.MintingPolicy
-policy = Plutus.mkMintingPolicyScript
-           $$(PlutusTx.compile [|| wrap ||])
+signer :: Plutus.PubKeyHash
+signer =
+  case fromHex $ LB.toStrict $ C8.pack "520719ebd328d3bd3a403a29dadaf6981bbddb5e8ff4e47d3f767f26" of
+    Left _err -> Prelude.error "fromHex signer failed"
+    Right ledgerBytes -> fromString $ show ledgerBytes
+
+policy :: Plutus.PubKeyHash -> Scripts.MintingPolicy
+policy reqSigner = Plutus.mkMintingPolicyScript $
+           $$(PlutusTx.compile [|| wrap ||]) `PlutusTx.applyCode` PlutusTx.liftCode reqSigner
  where
-   wrap = Scripts.wrapMintingPolicy mkPolicy
+   wrap s = Scripts.wrapMintingPolicy (mkPolicy s)
 
 plutusMintingScript :: Plutus.Script
 plutusMintingScript =
-  Plutus.unMintingPolicyScript policy
+  Plutus.unMintingPolicyScript $ policy signer
 
-mintingValidator :: Plutus.Validator
-mintingValidator =
-  Plutus.Validator $ Plutus.unMintingPolicyScript policy
+mintingValidator :: Plutus.PubKeyHash -> Plutus.Validator
+mintingValidator reqSigner =
+  Plutus.Validator . Plutus.unMintingPolicyScript $ policy reqSigner
 
-scriptAsCbor :: LB.ByteString
-scriptAsCbor = serialise mintingValidator
+scriptAsCbor :: Plutus.PubKeyHash -> LB.ByteString
+scriptAsCbor reqSigner = serialise $ mintingValidator reqSigner
 
 customApiExamplePlutusMintingScript :: PlutusScript PlutusScriptV1
-customApiExamplePlutusMintingScript = PlutusScriptSerialised . SBS.toShort $ LB.toStrict scriptAsCbor
+customApiExamplePlutusMintingScript =
+  PlutusScriptSerialised . SBS.toShort . LB.toStrict $ scriptAsCbor signer
 
 mintingScriptShortBs :: SBS.ShortByteString
-mintingScriptShortBs = SBS.toShort . LB.toStrict $ scriptAsCbor
+mintingScriptShortBs = SBS.toShort . LB.toStrict $ scriptAsCbor signer

@@ -722,7 +722,7 @@ pTransaction =
   pTransactionCreateWitness :: Parser TransactionCmd
   pTransactionCreateWitness = TxCreateWitness
                                 <$> pTxBodyFile Input
-                                <*> pWitnessSigningData
+                                <*> pWitnessToConstruct
                                 <*> optional pNetworkId
                                 <*> pOutputFile
 
@@ -1457,15 +1457,14 @@ pSomeWitnessSigningData :: Parser [WitnessSigningData]
 pSomeWitnessSigningData =
   some $
       KeyWitnessSigningData
-        <$>
-          ( SigningKeyFile <$>
+        <$> SigningKeyFile <$>
               Opt.strOption
                 (  Opt.long "signing-key-file"
                 <> Opt.metavar "FILE"
                 <> Opt.help "Input filepath of the signing key (one or more)."
                 <> Opt.completer (Opt.bashCompleter "file")
                 )
-          )
+
         <*>
           optional pByronAddress
 
@@ -1479,20 +1478,23 @@ pSigningKeyFile fdir =
       <> Opt.completer (Opt.bashCompleter "file")
       )
 
-pWitnessSigningData :: Parser WitnessSigningData
-pWitnessSigningData =
-    KeyWitnessSigningData
-      <$>
-        ( SigningKeyFile <$>
-            Opt.strOption
-              (  Opt.long "signing-key-file"
-              <> Opt.metavar "FILE"
-              <> Opt.help "Filepath of the signing key to be used in witness construction."
-              <> Opt.completer (Opt.bashCompleter "file")
-              )
-        )
-      <*>
-        optional pByronAddress
+pWitnessToConstruct :: Parser WitnessSigningData
+pWitnessToConstruct = transactionRequiredWitness <|> plutusRequiredSignerWitness
+ where
+  transactionRequiredWitness :: Parser WitnessSigningData
+  transactionRequiredWitness =
+   KeyWitnessSigningData
+     <$> SigningKeyFile <$>
+           Opt.strOption
+             (  Opt.long "signing-key-file"
+             <> Opt.metavar "FILE"
+             <> Opt.help "Filepath of the signing key to be used in witness construction."
+             <> Opt.completer (Opt.bashCompleter "file")
+             )
+     <*> optional pByronAddress
+
+  plutusRequiredSignerWitness :: Parser WitnessSigningData
+  plutusRequiredSignerWitness = PlutusRequiredSigner <$> pRequiredSigner
 
 pKesPeriod :: Parser KESPeriod
 pKesPeriod =

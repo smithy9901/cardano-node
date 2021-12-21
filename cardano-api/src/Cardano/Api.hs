@@ -339,6 +339,7 @@ module Cardano.Api (
     AnyPlutusScriptVersion(..),
     IsScriptLanguage(..),
     IsSimpleScriptLanguage(..),
+    payKeyHashToPlutusPkHash,
 
     -- ** Scripts in a specific language
     Script(..),

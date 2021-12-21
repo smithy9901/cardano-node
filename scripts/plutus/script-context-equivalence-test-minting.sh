@@ -86,14 +86,14 @@ cardano-cli transaction build \
   --script-invalid \
   --invalid-before 5 \
   --invalid-hereafter 500 \
-  --required-signer "cardano-cli/test/data/golden/shelley/keys/payment_keys/signing_key" \
   --change-address "$utxoaddr" \
+  --required-signer "cardano-cli/test/data/golden/shelley/keys/payment_keys/signing_key" \
   --tx-in "$scriptownertxin" \
   --tx-in-collateral "$scriptownerCollateral" \
   --mint-script-file "$plutusscriptinuse" \
   --mint-redeemer-file "$redeemer" \
-  --tx-out "$dummyaddress+1000000 + 5 $policyid.MillarCoin" \
-  --mint "5 $policyid.MillarCoin" \
+  --tx-out "$dummyaddress+1379280 + 5 $policyid.4D696C6C6172436F696E" \
+  --mint "5 $policyid.4D696C6C6172436F696E" \
   --protocol-params-file example/pparams.json \
   --out-file "$work/plutusmint.body"
 
@@ -127,17 +127,36 @@ cardano-cli transaction build \
   --tx-in-collateral "$scriptownerCollateral" \
   --mint-script-file "$plutusscriptinuse" \
   --mint-redeemer-file "$correctredeemer" \
-  --tx-out "$dummyaddress+1000000 + 5 $policyid.MillarCoin" \
-  --mint "5 $policyid.MillarCoin" \
+  --tx-out "$dummyaddress+1379280 + 5 $policyid.4D696C6C6172436F696E" \
+  --mint "5 $policyid.4D696C6C6172436F696E" \
   --protocol-params-file example/pparams.json \
   --out-file "$work/plutusmint-final.body"
 
-cardano-cli transaction sign \
+
+#TODO: We should be using a signer hash here!
+cardano-cli transaction witness \
+  --required-signer cardano-cli/test/data/golden/shelley/keys/payment_keys/signing_key \
   --tx-body-file "$work/plutusmint-final.body" \
-  --testnet-magic 42 \
+  --out-file "$work/required_signer.witness"
+
+cardano-cli transaction witness \
   --signing-key-file "$targetskey" \
-  --signing-key-file "cardano-cli/test/data/golden/shelley/keys/payment_keys/signing_key" \
+  --tx-body-file "$work/plutusmint-final.body" \
+  --out-file "$work/tx.witness"
+
+# TODO: Need to distinguish requires signer vs tx witness here (in assemble command)
+cardano-cli transaction assemble \
+  --tx-body-file "$work/plutusmint-final.body" \
+  --witness-file "$work/tx.witness" \
+  --witness-file "$work/required_signer.witness" \
   --out-file "$work/plutusmint-final.tx"
+
+#cardano-cli transaction sign \
+#  --tx-body-file "$work/plutusmint-final.body" \
+#  --testnet-magic 42 \
+#  --signing-key-file "$targetskey" \
+#  --signing-key-file "cardano-cli/test/data/golden/shelley/keys/payment_keys/signing_key" \
+#  --out-file "$work/plutusmint-final.tx"
 
 # SUBMIT
 cardano-cli transaction submit --tx-file "$work/plutusmint-final.tx" --testnet-magic 42

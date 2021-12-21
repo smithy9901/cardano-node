@@ -33,6 +33,8 @@ module Cardano.Api.KeysShelley (
     VerificationKey(..),
     SigningKey(..),
     Hash(..),
+
+    payKeyHashToPlutusPkHash,
   ) where
 
 import           Prelude
@@ -47,8 +49,10 @@ import qualified Cardano.Crypto.DSIGN.Class as Crypto
 import qualified Cardano.Crypto.Hash.Class as Crypto
 import qualified Cardano.Crypto.Seed as Crypto
 import qualified Cardano.Crypto.Wallet as Crypto.HD
+import qualified Cardano.Ledger.Alonzo.TxInfo as Alonzo
 import qualified Cardano.Ledger.Crypto as Shelley (DSIGN)
 import qualified Cardano.Ledger.Keys as Shelley
+import qualified Plutus.V1.Ledger.Api as Plutus
 
 import           Cardano.Ledger.Crypto (StandardCrypto)
 
@@ -163,7 +167,13 @@ instance HasTextEnvelope (SigningKey PaymentKey) where
         proxy :: Proxy (Shelley.DSIGN StandardCrypto)
         proxy = Proxy
 
+instance HasTextEnvelope (Hash PaymentKey) where
+    textEnvelopeType _ = "PaymentKeyShelleyHash"
 
+-- TODO: Left off here need to export and potentially use a
+-- Read instance to get this into the smart contract.
+payKeyHashToPlutusPkHash :: Hash PaymentKey -> Plutus.PubKeyHash
+payKeyHashToPlutusPkHash (PaymentKeyHash h) = Alonzo.transKeyHash h
 --
 -- Shelley payment extended ed25519 keys
 --
@@ -296,6 +306,9 @@ instance HasTextEnvelope (VerificationKey PaymentExtendedKey) where
 
 instance HasTextEnvelope (SigningKey PaymentExtendedKey) where
     textEnvelopeType _ = "PaymentExtendedSigningKeyShelley_ed25519_bip32"
+
+instance HasTextEnvelope (Hash PaymentExtendedKey) where
+    textEnvelopeType _ = "PaymentExtendedKeyShelleyHash"
 
 instance CastVerificationKeyRole PaymentExtendedKey PaymentKey where
     castVerificationKey (PaymentExtendedVerificationKey vk) =
@@ -1104,6 +1117,9 @@ instance HasTextEnvelope (SigningKey GenesisUTxOKey) where
         proxy = Proxy
     -- TODO: use a different type from the stake pool key, since some operations
     -- need a genesis key specifically
+
+instance HasTextEnvelope (Hash GenesisUTxOKey) where
+    textEnvelopeType _ = "GenesisUTxOKeyShelleyHash"
 
 instance CastVerificationKeyRole GenesisUTxOKey PaymentKey where
     castVerificationKey (GenesisUTxOVerificationKey (Shelley.VKey vkey)) =

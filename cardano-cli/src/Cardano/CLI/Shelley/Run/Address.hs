@@ -15,10 +15,12 @@ import           Cardano.Prelude hiding (putStrLn)
 
 
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
+import           Data.Aeson.Encode.Pretty (encodePretty)
 
-import           Control.Monad.Trans.Except.Extra (firstExceptT, newExceptT)
+import           Control.Monad.Trans.Except.Extra (firstExceptT, handleIOExceptT, newExceptT)
 
 import           Cardano.Api
 import           Cardano.Api.Shelley
@@ -95,13 +97,24 @@ runAddressKeyHash vkeyTextOrFile mOutputFp = do
   vkey <- firstExceptT ShelleyAddressCmdVerificationKeyTextOrFileError $
             readAddressVerificationKeyTextOrFile vkeyTextOrFile
 
+  h <- case vkey of
+         AByronVerificationKey key ->
+           return . encodePretty $ serialiseToTextEnvelope Nothing $ verificationKeyHash key
+         APaymentVerificationKey key ->
+           return . encodePretty $ serialiseToTextEnvelope Nothing $ verificationKeyHash key
+         APaymentExtendedVerificationKey key ->
+           return . encodePretty $ serialiseToTextEnvelope Nothing $ verificationKeyHash key
+         AGenesisUTxOVerificationKey key ->
+           return . encodePretty $ serialiseToTextEnvelope Nothing $ verificationKeyHash key
+
   let hexKeyHash = foldSomeAddressVerificationKey
                      (serialiseToRawBytesHex . verificationKeyHash) vkey
 
   case mOutputFp of
-    Just (OutputFile fpath) -> liftIO $ BS.writeFile fpath hexKeyHash
+    Just (OutputFile fpath) ->
+      firstExceptT ShelleyAddressCmdWriteFileError
+        . handleIOExceptT (FileIOError fpath) $ LBS.writeFile fpath h
     Nothing -> liftIO $ BS.putStrLn hexKeyHash
-
 
 runAddressBuild :: PaymentVerifier
                 -> Maybe StakeVerifier

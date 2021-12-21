@@ -13,14 +13,15 @@ module Cardano.CLI.Shelley.Run.Transaction
   , runTransactionCmd
   ) where
 
-import           Cardano.Prelude hiding (All, Any)
-import           Prelude (String, error)
+import           Cardano.Prelude hiding (All, Any, print)
+import           Prelude (String, error, print)
 
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import           Data.List (intersect, (\\))
 import qualified Data.Map.Strict as Map
+import           Data.Coerce (coerce)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import           Data.Type.Equality (TestEquality (..))
@@ -39,6 +40,7 @@ import qualified Cardano.Binary as CBOR
 --TODO: following import needed for orphan Eq Script instance
 import           Cardano.Ledger.Shelley.Scripts ()
 import           Cardano.Ledger.ShelleyMA.TxBody ()
+import qualified Cardano.Ledger.Alonzo.TxBody as Alonzo
 
 import           Cardano.CLI.Environment (EnvSocketError, readEnvSocketPath, renderEnvSocketError)
 import           Cardano.CLI.Run.Friendly (friendlyTxBodyBS)
@@ -972,7 +974,7 @@ runTxSign (TxBodyFile txbodyFile) witSigningData mnw (TxFile txFile) = do
   sks <- firstExceptT ShelleyTxCmdReadWitnessSigningDataError $
            mapM readWitnessSigningData witSigningData
 
-  let (sksByron, sksShelley) = partitionSomeWitnesses $ map categoriseSomeWitness sks
+  let (sksByron, sksShelley, _) = partitionSomeWitnesses $ map categoriseSomeWitness sks
 
   -- Byron witnesses require the network ID. This can either be provided
   -- directly or derived from a provided Byron address.
@@ -1119,13 +1121,15 @@ data SomeWitness
   | AGenesisDelegateExtendedSigningKey
                                (SigningKey GenesisDelegateExtendedKey)
   | AGenesisUTxOSigningKey     (SigningKey GenesisUTxOKey)
-
+  | APlutusRequiredSigner      (Hash PaymentKey)
 
 -- | Error reading the data required to construct a key witness.
 data ReadWitnessSigningDataError
   = ReadWitnessSigningDataSigningKeyDecodeError !(FileError InputDecodeError)
   | ReadWitnessSigningDataScriptError !(FileError JsonDecodeError)
   | ReadWitnessSigningDataSigningKeyAndAddressMismatch
+  | ReadWitnessSigningDataRequiredSignerError !(FileError InputDecodeError)
+  | ReadWitnessSigningDataByronKeyError !SigningKeyFile
   -- ^ A Byron address was specified alongside a non-Byron signing key.
   deriving Show
 
@@ -1139,10 +1143,31 @@ renderReadWitnessSigningDataError err =
       "Error reading script: " <> Text.pack (displayError fileErr)
     ReadWitnessSigningDataSigningKeyAndAddressMismatch ->
       "Only a Byron signing key may be accompanied by a Byron address."
+    ReadWitnessSigningDataRequiredSignerError _ -> ""
+    ReadWitnessSigningDataByronKeyError _ -> ""
 
 readWitnessSigningData
   :: WitnessSigningData
   -> ExceptT ReadWitnessSigningDataError IO SomeWitness
+readWitnessSigningData (PlutusRequiredSigner (RequiredSignerHash h)) =
+  return $ APlutusRequiredSigner h
+readWitnessSigningData (PlutusRequiredSigner (RequiredSignerSkeyFile skFile)) = do
+  keyWit <- firstExceptT ReadWitnessSigningDataRequiredSignerError
+              . newExceptT
+              $ readSigningKeyFileAnyOf bech32FileTypes textEnvFileTypes skFile
+  case categoriseSomeWitness keyWit of
+    AByronWitness _ ->
+      left $ ReadWitnessSigningDataByronKeyError skFile
+    AShelleyKeyWitness skey ->
+      return . APlutusRequiredSigner . getHash $ toShelleySigningKey skey
+    APlutusRequiredSignerWitness h -> return $ APlutusRequiredSigner h
+ where
+   textEnvFileTypes =
+     [ FromSomeType (AsSigningKey AsPaymentKey) APaymentSigningKey
+     , FromSomeType (AsSigningKey AsPaymentExtendedKey)
+                          APaymentExtendedSigningKey
+     ]
+   bech32FileTypes = []
 readWitnessSigningData (KeyWitnessSigningData skFile mbByronAddr) = do
     res <- firstExceptT ReadWitnessSigningDataSigningKeyDecodeError
       . newExceptT
@@ -1194,29 +1219,34 @@ readWitnessSigningData (KeyWitnessSigningData skFile mbByronAddr) = do
       ]
 
 partitionSomeWitnesses
-  :: [ByronOrShelleyWitness]
+  :: [TransactionWitness]
   -> ( [ShelleyBootstrapWitnessSigningKeyData]
      , [ShelleyWitnessSigningKey]
+     , [Hash PaymentKey]
      )
 partitionSomeWitnesses = reversePartitionedWits . foldl' go mempty
   where
-    reversePartitionedWits (bw, skw) =
-      (reverse bw, reverse skw)
+    reversePartitionedWits (bw, skw, plutusReqSigners) =
+      (reverse bw, reverse skw, reverse plutusReqSigners)
 
-    go (byronAcc, shelleyKeyAcc) byronOrShelleyWit =
+    go (byronAcc, shelleyKeyAcc, plutusReqSigners) byronOrShelleyWit =
       case byronOrShelleyWit of
         AByronWitness byronWit ->
-          (byronWit:byronAcc, shelleyKeyAcc)
+          (byronWit:byronAcc, shelleyKeyAcc, plutusReqSigners)
         AShelleyKeyWitness shelleyKeyWit ->
-          (byronAcc, shelleyKeyWit:shelleyKeyAcc)
+          (byronAcc, shelleyKeyWit:shelleyKeyAcc, plutusReqSigners)
+        APlutusRequiredSignerWitness reqSigner ->
+          (byronAcc, shelleyKeyAcc, reqSigner : plutusReqSigners)
+
 
 
 -- | Some kind of Byron or Shelley witness.
-data ByronOrShelleyWitness
+data TransactionWitness
   = AByronWitness !ShelleyBootstrapWitnessSigningKeyData
   | AShelleyKeyWitness !ShelleyWitnessSigningKey
+  | APlutusRequiredSignerWitness !(Hash PaymentKey)
 
-categoriseSomeWitness :: SomeWitness -> ByronOrShelleyWitness
+categoriseSomeWitness :: SomeWitness -> TransactionWitness
 categoriseSomeWitness swsk =
   case swsk of
     AByronSigningKey           sk addr -> AByronWitness (ShelleyBootstrapWitnessSigningKeyData sk addr)
@@ -1231,6 +1261,7 @@ categoriseSomeWitness swsk =
     AGenesisDelegateExtendedSigningKey sk
                                        -> AShelleyKeyWitness (WitnessGenesisDelegateExtendedKey sk)
     AGenesisUTxOSigningKey     sk      -> AShelleyKeyWitness (WitnessGenesisUTxOKey     sk)
+    APlutusRequiredSigner reqSigner    -> APlutusRequiredSignerWitness reqSigner
 
 -- | Data required for constructing a Shelley bootstrap witness.
 data ShelleyBootstrapWitnessSigningKeyData
@@ -1338,21 +1369,30 @@ runTxCreateWitness (TxBodyFile txbodyFile) witSignData mbNw (OutputFile oFile) =
   someWit <- firstExceptT ShelleyTxCmdReadWitnessSigningDataError
     $ readWitnessSigningData witSignData
 
-  witness <-
-    case categoriseSomeWitness someWit of
-      -- Byron witnesses require the network ID. This can either be provided
-      -- directly or derived from a provided Byron address.
-      AByronWitness bootstrapWitData ->
-        firstExceptT ShelleyTxCmdBootstrapWitnessError
-          . hoistEither
-          $ mkShelleyBootstrapWitness mbNw txbody bootstrapWitData
-      AShelleyKeyWitness skShelley ->
-        pure $ makeShelleyKeyWitness txbody skShelley
+  --witness <-
+  case categoriseSomeWitness someWit of
+    -- Byron witnesses require the network ID. This can either be provided
+    -- directly or derived from a provided Byron address.
+    AByronWitness bootstrapWitData -> do
+      wit <- firstExceptT ShelleyTxCmdBootstrapWitnessError
+               . hoistEither
+               $ mkShelleyBootstrapWitness mbNw txbody bootstrapWitData
+      firstExceptT ShelleyTxCmdWriteFileError
+        . newExceptT
+        $ writeFileTextEnvelope oFile Nothing wit
 
-  firstExceptT ShelleyTxCmdWriteFileError
-    . newExceptT
-    $ writeFileTextEnvelope oFile Nothing witness
-
+    AShelleyKeyWitness skShelley ->
+      let wit = makeShelleyKeyWitness txbody skShelley
+      in firstExceptT ShelleyTxCmdWriteFileError
+           . newExceptT
+           $ writeFileTextEnvelope oFile Nothing wit
+    -- Plutus scripts require a public key hash
+    APlutusRequiredSignerWitness keyHash -> do
+       -- Convert to plutus pub key hash and print it
+      liftIO . print $ payKeyHashToPlutusPkHash keyHash
+      firstExceptT ShelleyTxCmdWriteFileError
+        . newExceptT
+        $ writeFileTextEnvelope oFile Nothing keyHash
 
 runTxSignWitness
   :: TxBodyFile
@@ -1365,31 +1405,75 @@ runTxSignWitness (TxBodyFile txbodyFile) witnessFiles (OutputFile oFp) = do
           --TODO: in principle we should be able to support Byron era txs too
           onlyInShelleyBasedEras "sign for Byron era transactions"
                                  (InAnyCardanoEra era txbody)
-
-    witnesses <-
-      sequence
-        [ do InAnyCardanoEra era' witness <- readFileWitness file
-             case testEquality era era' of
-               Nothing   -> left $ ShelleyTxCmdWitnessEraMismatch
-                                     (AnyCardanoEra era)
-                                     (AnyCardanoEra era')
-                                     witnessFile
-               Just Refl -> return witness
-        | witnessFile@(WitnessFile file) <- witnessFiles ]
-
-    let tx = makeSignedTransaction witnesses txbody
+    txWits <- mapM readFileWitness witnessFiles
+    let (keyWits, plutusReqSigners) = partitionWitnesses txWits
+    apiKeyWits <- mapM (getKeyWitness era) keyWits
+    reqSigners <- mapM getRequiredSigners plutusReqSigners
+    let tx = makeSignedTransaction (mconcat apiKeyWits) $ updateRequiredSigners (mconcat reqSigners) txbody
     firstExceptT ShelleyTxCmdWriteFileError
       . newExceptT
       $ writeFileTextEnvelope oFp Nothing tx
+ where
+  updateRequiredSigners
+    :: [Hash PaymentKey] ->  TxBody era -> TxBody era
+  updateRequiredSigners reqSigners bdy@(ShelleyTxBody sbe txbody s sd a v) =
+    case sbe of
+      ShelleyBasedEraShelley -> bdy
+      ShelleyBasedEraMary -> bdy
+      ShelleyBasedEraAllegra -> bdy
+      ShelleyBasedEraAlonzo ->
+        let currentReqSigners = Alonzo.reqSignerHashes txbody
+            newReqSigners = Set.fromList $ map (\(PaymentKeyHash kh) -> coerce kh ) reqSigners
+        in ShelleyTxBody sbe txbody {Alonzo.reqSignerHashes = currentReqSigners `Set.union` newReqSigners } s sd a v
+  updateRequiredSigners _ bdy = bdy
 
+  getRequiredSigners :: (FilePath, TxWitness) -> ExceptT ShelleyTxCmdError IO  [Hash PaymentKey]
+  getRequiredSigners (_witFp, PlutusReqSigner reqSignerHash) = return [reqSignerHash]
+  getRequiredSigners _ = return []
 
+  getKeyWitness
+    :: IsCardanoEra era => CardanoEra era
+    -> (FilePath, TxWitness) -> ExceptT ShelleyTxCmdError IO [KeyWitness era]
+  getKeyWitness era (witFp, KeyWit (InAnyCardanoEra era' keywit)) =
+    case testEquality era era' of
+      Nothing   -> left $ ShelleyTxCmdWitnessEraMismatch
+                            (AnyCardanoEra era)
+                            (AnyCardanoEra era')
+                            (WitnessFile witFp)
+      Just Refl ->  return [keywit]
+
+  getKeyWitness _ _ = return []
+
+  partitionWitnesses :: [(FilePath, TxWitness)] -> ([(FilePath, TxWitness)], [(FilePath, TxWitness)])
+  partitionWitnesses wits = go wits ([],[])
+    where
+      go [] partitioned = partitioned
+      go (kw@(_, KeyWit _) : rest) (keyWits, prs) =
+        go rest (kw : keyWits, prs)
+      go (prs@(_, PlutusReqSigner _) : rest) (kwts, plutusReqSigners) =
+        go rest (kwts, prs : plutusReqSigners)
 -- ----------------------------------------------------------------------------
 -- Reading files in any era
 --
 
-readFileWitness :: FilePath
-                -> ExceptT ShelleyTxCmdError IO (InAnyCardanoEra KeyWitness)
-readFileWitness = readFileInAnyCardanoEra AsKeyWitness
+data TxWitness = KeyWit (InAnyCardanoEra KeyWitness)
+               | PlutusReqSigner (Hash PaymentKey)
+
+readFileWitness :: WitnessFile
+                -> ExceptT ShelleyTxCmdError IO (FilePath, TxWitness)
+readFileWitness (WitnessFile fp) = do
+  txWit <- firstExceptT ShelleyTxCmdReadTextViewFileError . newExceptT $ readFileTextEnvelopeAnyOf types fp
+  return (fp, txWit)
+ where
+  types :: [FromSomeType HasTextEnvelope TxWitness]
+  types = [ FromSomeType (AsKeyWitness AsByronEra) (KeyWit . InAnyCardanoEra ByronEra)
+          , FromSomeType (AsKeyWitness AsShelleyEra) (KeyWit . InAnyCardanoEra ShelleyEra)
+          , FromSomeType (AsKeyWitness AsAllegraEra) (KeyWit . InAnyCardanoEra AllegraEra)
+          , FromSomeType (AsKeyWitness AsMaryEra) (KeyWit . InAnyCardanoEra MaryEra)
+          , FromSomeType (AsKeyWitness AsAlonzoEra) (KeyWit . InAnyCardanoEra AlonzoEra)
+
+          , FromSomeType (AsHash AsPaymentKey) PlutusReqSigner
+          ]
 
 
 readFileTxBody :: FilePath
@@ -1435,6 +1519,7 @@ readRequiredSigner (RequiredSignerSkeyFile skFile) = do
       left $ ShelleyTxCmdRequiredSignerByronKeyError skFile
     AShelleyKeyWitness skey ->
       return . getHash $ toShelleySigningKey skey
+    APlutusRequiredSignerWitness h -> return h
  where
    textEnvFileTypes =
      [ FromSomeType (AsSigningKey AsPaymentKey) APaymentSigningKey
@@ -1443,13 +1528,13 @@ readRequiredSigner (RequiredSignerSkeyFile skFile) = do
      ]
    bech32FileTypes = []
 
-   getHash :: ShelleySigningKey -> Hash PaymentKey
-   getHash (ShelleyExtendedSigningKey sk) =
-     let extSKey = PaymentExtendedSigningKey sk
-         payVKey = castVerificationKey $ getVerificationKey extSKey
-     in verificationKeyHash payVKey
-   getHash (ShelleyNormalSigningKey sk) =
-     verificationKeyHash . getVerificationKey $ PaymentSigningKey sk
+getHash :: ShelleySigningKey -> Hash PaymentKey
+getHash (ShelleyExtendedSigningKey sk) =
+  let extSKey = PaymentExtendedSigningKey sk
+      payVKey = castVerificationKey $ getVerificationKey extSKey
+  in verificationKeyHash payVKey
+getHash (ShelleyNormalSigningKey sk) =
+  verificationKeyHash . getVerificationKey $ PaymentSigningKey sk
 
 
 -- | Constrain the era to be Shelley based. Fail for the Byron era.
