@@ -133,7 +133,7 @@ let
       # musl on x86_64, can load dynamic libraries, and we need it to use the
       # shared loader, as the one in GHC is not very stable.
       packages.cardano-api.components.library.enableShared = true;
-      packages.cardano-config.components.library.enableShared = true;
+      packages.cardano-git-rev.components.library.enableShared = true;
       packages.cardano-node.components.library.enableShared = true;
       packages.cardano-cli.components.library.enableShared = true;
       # split data output for ekg to reduce closure size
@@ -191,7 +191,7 @@ let
     }
     ({ pkgs, ... }: lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
       # systemd can't be statically linked
-      packages.cardano-config.flags.systemd = !pkgs.stdenv.hostPlatform.isMusl;
+      packages.cardano-git-rev.flags.systemd = !pkgs.stdenv.hostPlatform.isMusl;
       packages.cardano-node.flags.systemd = !pkgs.stdenv.hostPlatform.isMusl;
     })
     # Musl libc fully static build

@@ -42,7 +42,7 @@ library
                      , attoparsec
                      , attoparsec-iso8601
                      , bytestring
-                     , cardano-config
+                     , cardano-git-rev
                      , cardano-prelude
                      , containers
                      , deepseq
