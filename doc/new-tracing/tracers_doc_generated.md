@@ -1,6 +1,6 @@
 # Cardano Trace Documentation# Table Of Contents
-1.[Trace Messages] (#trace-messages)
-1.1 [Cardano.Node.AcceptPolicy.ConectionRateLimiting] (#cardanonodeacceptpolicyconectionratelimiting)
+1. [Trace Messages](#trace-messages)
+1.1 [Cardano.Node.AcceptPolicy.ConectionRateLimiting](#cardanonodeacceptpolicyconectionratelimiting)
 1.2 [Cardano.Node.AcceptPolicy.ConnectionHardLimit] (#cardanonodeacceptpolicyconnectionhardlimit)
 1.3 [Cardano.Node.BlockFetch.NodeToNode.Send.BatchDone] (#cardanonodeblockfetchnodetonodesendbatchdone)
 1.4 [Cardano.Node.BlockFetch.NodeToNode.Send.Block] (#cardanonodeblockfetchnodetonodesendblock)
